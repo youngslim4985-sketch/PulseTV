@@ -1,0 +1,6 @@
+{
+  "name": "Roku Web Streamer",
+  "description": "A high-fidelity Roku-style streaming dashboard with live TV, sports, and movies. Built with React and Express.",
+  "requestFramePermissions": ["fullscreen"],
+  "majorCapabilities": ["video_playback", "search", "content_management"]
+}
