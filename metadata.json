@@ -1,6 +1,6 @@
 {
-  "name": "Roku Web Streamer",
-  "description": "A high-fidelity Roku-style streaming dashboard with live TV, sports, and movies. Built with React and Express.",
+  "name": "Apple TV Web Streamer",
+  "description": "A premium tvOS-inspired streaming experience with glassmorphism, parallax effects, and unified content categories. Built with React and Express.",
   "requestFramePermissions": ["fullscreen"],
-  "majorCapabilities": ["video_playback", "search", "content_management"]
+  "majorCapabilities": ["video_playback", "search", "content_management", "personalized_recommendations"]
 }

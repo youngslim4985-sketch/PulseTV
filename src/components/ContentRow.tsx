@@ -12,9 +12,10 @@ interface ContentRowProps {
   title: string;
   items: ContentItem[];
   onSelect: (item: ContentItem) => void;
+  resumePositions?: Record<string, number>;
 }
 
-export default function ContentRow({ title, items, onSelect }: ContentRowProps) {
+export default function ContentRow({ title, items, onSelect, resumePositions }: ContentRowProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const scroll = (direction: "left" | "right") => {
@@ -50,9 +51,20 @@ export default function ContentRow({ title, items, onSelect }: ContentRowProps) 
         className="flex gap-6 overflow-x-auto px-10 pb-6 scrollbar-hide scroll-smooth no-scrollbar"
         style={{ msOverflowStyle: 'none', scrollbarWidth: 'none' }}
       >
-        {items.map((item) => (
-          <ContentCard key={item.id} item={item} onClick={onSelect} />
-        ))}
+        {items.map((item) => {
+          const resumeTime = resumePositions?.[item.id] || 0;
+          // Estimate progress: assume 2 hour duration (7200s) if missing
+          const progress = item.duration ? (resumeTime / item.duration) * 100 : (resumeTime / 7200) * 100;
+          
+          return (
+            <ContentCard 
+              key={item.id} 
+              item={item} 
+              onClick={onSelect} 
+              progress={progress > 0 ? progress : undefined} 
+            />
+          );
+        })}
       </div>
     </div>
   );

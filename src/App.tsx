@@ -12,13 +12,33 @@ import {
 import ContentRow from "./components/ContentRow";
 import SportsPlayer from "./components/SportsPlayer";
 import SearchScreen from "./components/SearchScreen";
-import { ContentData, ContentItem, View } from "./types";
+import ProfilePicker from "./components/ProfilePicker";
+import LeagueTabs from "./components/LeagueTabs";
+import { ContentData, ContentItem, View, Profile } from "./types";
+import { getRecommendations } from "./services/recommendationService";
+
+const DEFAULT_PROFILES: Profile[] = [
+  { id: "p1", name: "Guest", avatar: "bg-purple-600", favorites: [], resumePositions: {} },
+  { id: "p2", name: "Kids", avatar: "bg-blue-500", favorites: [], resumePositions: {} },
+];
 
 export default function App() {
-  const [view, setView] = useState<View>("home");
+  const [view, setView] = useState<View>("profiles");
   const [data, setData] = useState<ContentData | null>(null);
+  const [recommendations, setRecommendations] = useState<ContentItem[]>([]);
+  const [recentlyWatched, setRecentlyWatched] = useState<ContentItem[]>([]);
+  const [viewingHistory, setViewingHistory] = useState<string[]>([]);
   const [selectedItem, setSelectedItem] = useState<ContentItem | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  
+  // Sport specific state
+  const [activeSport, setActiveSport] = useState<"Basketball" | "Soccer">("Basketball");
+  const [activeLeague, setActiveLeague] = useState<string>("All Basketball");
+  const [myList, setMyList] = useState<ContentItem[]>([]);
+
+  // Profile state
+  const [profiles, setProfiles] = useState<Profile[]>(DEFAULT_PROFILES);
+  const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
     fetch("/api/content")
@@ -26,157 +46,342 @@ export default function App() {
       .then(setData)
       .catch(console.error);
 
+    // Load profiles
+    const savedProfiles = localStorage.getItem("roku-profiles");
+    if (savedProfiles) {
+      setProfiles(JSON.parse(savedProfiles));
+    }
+
+    // Load active profile
+    const savedActiveId = localStorage.getItem("roku-active-profile-id");
+    if (savedActiveId && savedProfiles) {
+      const allProfiles = JSON.parse(savedProfiles) as Profile[];
+      const found = allProfiles.find(p => p.id === savedActiveId);
+      if (found) {
+        handleProfileSelect(found);
+      }
+    }
+
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
+  // Sync recommendations whenever data or activeProfile/history changes
+  useEffect(() => {
+    if (data && activeProfile) {
+      const recs = getRecommendations(data, viewingHistory);
+      setRecommendations(recs);
+
+      // Calculate recently watched
+      const bbItems = data.basketball ? Object.values(data.basketball).flat() : [];
+      const soccerItems = data.soccer ? Object.values(data.soccer).flat() : [];
+      const allContent = [...data.movies, ...data.sports, ...data.live_tv, ...bbItems, ...soccerItems];
+      const recent = viewingHistory
+        .map(id => allContent.find(item => item.id === id))
+        .filter((item): item is ContentItem => !!item)
+        .slice(0, 10);
+      setRecentlyWatched(recent);
+
+      // Calculate My List
+      const favoriteItems = (activeProfile.favorites || [])
+        .map(id => allContent.find(item => item.id === id))
+        .filter((item): item is ContentItem => !!item);
+      setMyList(favoriteItems);
+    }
+  }, [data, activeProfile, viewingHistory]);
+
+  const handleProfileSelect = (profile: Profile) => {
+    setActiveProfile(profile);
+    localStorage.setItem("roku-active-profile-id", profile.id);
+    
+    // Load history for this specific profile
+    const savedHistory = localStorage.getItem(`roku-history-${profile.id}`);
+    if (savedHistory) {
+      setViewingHistory(JSON.parse(savedHistory));
+    } else {
+      setViewingHistory([]);
+    }
+    
+    setView("home");
+  };
+
+  const handleAddProfile = () => {
+    const name = prompt("Enter profile name:");
+    if (name) {
+      const newProfile: Profile = {
+        id: `p-${Date.now()}`,
+        name,
+        avatar: ["bg-red-500", "bg-green-500", "bg-yellow-500", "bg-pink-500"][Math.floor(Math.random() * 4)],
+        favorites: [],
+        resumePositions: {}
+      };
+      const updated = [...profiles, newProfile];
+      setProfiles(updated);
+      localStorage.setItem("roku-profiles", JSON.stringify(updated));
+    }
+  };
+
+  const toggleFavorite = (itemId: string) => {
+    if (!activeProfile) return;
+    
+    const isFavorite = activeProfile.favorites.includes(itemId);
+    const updatedFavorites = isFavorite 
+      ? activeProfile.favorites.filter(id => id !== itemId)
+      : [...activeProfile.favorites, itemId];
+    
+    const updatedProfile = { ...activeProfile, favorites: updatedFavorites };
+    setActiveProfile(updatedProfile);
+    
+    const updatedProfiles = profiles.map(p => p.id === activeProfile.id ? updatedProfile : p);
+    setProfiles(updatedProfiles);
+    localStorage.setItem("roku-profiles", JSON.stringify(updatedProfiles));
+  };
+
+  const updateResumePosition = (itemId: string, seconds: number) => {
+    if (!activeProfile) return;
+    
+    const updatedPositions = { ...activeProfile.resumePositions, [itemId]: seconds };
+    const updatedProfile = { ...activeProfile, resumePositions: updatedPositions };
+    
+    setActiveProfile(updatedProfile);
+    
+    const updatedProfiles = profiles.map(p => p.id === activeProfile.id ? updatedProfile : p);
+    setProfiles(updatedProfiles);
+    localStorage.setItem("roku-profiles", JSON.stringify(updatedProfiles));
+  };
+
   const handleSelect = (item: ContentItem) => {
+    if (!activeProfile) return;
     setSelectedItem(item);
     setView("player");
+
+    // Update history for active profile
+    const newHistory = [item.id, ...viewingHistory.filter(id => id !== item.id)].slice(0, 50);
+    setViewingHistory(newHistory);
+    localStorage.setItem(`roku-history-${activeProfile.id}`, JSON.stringify(newHistory));
   };
 
   const navItems = [
     { id: "home", icon: Home, label: "Home" },
-    { id: "search", icon: SearchIcon, label: "Search" },
     { id: "shows", icon: Tv, label: "Live TV" },
     { id: "movies", icon: Film, label: "Movies" },
     { id: "sports", icon: Trophy, label: "Sports" },
+    { id: "search", icon: SearchIcon, label: "Search" },
   ];
 
   if (!data) return (
-    <div className="h-screen bg-roku-dark flex items-center justify-center">
-      <div className="w-12 h-12 border-4 border-roku-purple border-t-roku-gold rounded-full animate-spin" />
+    <div className="h-screen bg-apple-midnight flex items-center justify-center">
+      <div className="w-12 h-12 border-4 border-white/5 border-t-white rounded-full animate-spin" />
     </div>
   );
 
   return (
-    <div className="h-screen flex bg-roku-dark overflow-hidden select-none relative">
+    <div className="h-screen flex flex-col bg-apple-midnight overflow-hidden select-none relative">
       {/* Immersive radial gradient background */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-20%,#3b0a64_0%,transparent_60%)] opacity-40 pointer-events-none"></div>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-20%,#1e3a8a_0%,transparent_70%)] opacity-30 pointer-events-none"></div>
 
-      {/* Side Navigation */}
-      <nav className="w-24 h-full bg-roku-sidebar border-r border-white/5 flex flex-col items-center py-10 z-20">
-        <div className="flex flex-col items-center gap-12 w-full">
+      {/* Top Navigation Bar (Apple TV Style) */}
+      <nav className="h-24 px-12 flex items-center justify-between z-30 fixed top-0 left-0 right-0 glass border-none bg-apple-midnight/40 blur-none">
+        <div className="flex items-center gap-12">
           {/* Logo */}
-          <div className="w-12 h-12 bg-linear-to-br from-purple-600 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/20 text-white">
-            <span className="font-black text-xl italic">R</span>
+          <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center border border-white/10 text-white">
+            <span className="font-black text-xl italic tracking-tighter"></span>
           </div>
 
-          <ul className="flex flex-col gap-10">
+          <ul className="flex items-center gap-2">
             {navItems.map((item) => (
               <li key={item.id}>
                 <button
                   onClick={() => setView(item.id === "search" ? "search" : "home")}
-                  className={`p-2 transition-all duration-200 group relative
-                    ${view === item.id ? 'text-purple-400 opacity-100' : 'text-white opacity-40 hover:opacity-100'}`}
+                  className={`px-6 py-2 rounded-full font-display font-bold text-sm tracking-wide transition-all duration-300
+                    ${view === item.id && item.id !== 'search' ? 'bg-white text-black scale-105' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
                 >
-                  <item.icon className="w-6 h-6" />
+                  {item.label}
                 </button>
               </li>
             ))}
           </ul>
         </div>
 
-        <div className="mt-auto mb-4">
-          <div className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-          </div>
+        <div className="flex items-center gap-8">
+            <div className="text-right hidden sm:block">
+              <div className="text-sm font-display font-medium text-white/40 tracking-widest uppercase">tv+</div>
+            </div>
+            
+            <button 
+              onClick={() => setView("profiles")}
+              className="flex items-center gap-4 hover:scale-105 transition-transform"
+            >
+              <div className={`w-11 h-11 rounded-full ${activeProfile?.avatar || "bg-zinc-800"} flex items-center justify-center shadow-2xl border-2 border-white/10`}>
+                 <User className="w-5 h-5 text-white/80" />
+              </div>
+            </button>
         </div>
       </nav>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col relative z-10 overflow-hidden">
-        {/* Top Bar */}
-        <header className="h-20 flex items-center justify-between px-10 relative z-10">
-          <div className="flex items-center gap-4">
-            <span className="text-xs font-mono tracking-[0.2em] text-white/40 uppercase">Roku Web Streamer v1.0.4</span>
-            <div className="h-4 w-px bg-white/10"></div>
-            <span className="text-xs font-mono text-green-400">SERVER: {currentTime.getSeconds() % 2 === 0 ? "192.168.1.52:3000" : "AIS-DEV-SERVER:3000"}</span>
-          </div>
+      <main className="flex-1 flex flex-col relative z-10 pt-24 overflow-hidden">
+        {/* Secondary Header / Stats */}
+        <div className="h-12 flex items-center justify-between px-16 relative z-10">
           <div className="flex items-center gap-6">
-            <div className="text-right">
-              <div className="text-[10px] uppercase tracking-widest text-white/30">Current Bandwidth</div>
-              <div className="text-xs font-mono">58.4 Mbps (720p Floor)</div>
-            </div>
-            <div className="text-right border-l border-white/10 pl-6">
-              <div className="text-xl font-display font-bold text-white">{currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-              <div className="text-[10px] text-white/30 uppercase tracking-widest">{currentTime.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</div>
-            </div>
+            <span className="text-[10px] font-mono tracking-[0.3em] text-white/30 uppercase">Dolby Vision • Atmos • 4K</span>
+            <div className="h-3 w-px bg-white/10"></div>
+            <span className="text-[10px] font-mono text-apple-blue font-bold tracking-widest">{currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
           </div>
-        </header>
+          <div className="flex items-center gap-4 text-[10px] font-mono text-white/20 uppercase tracking-widest">
+            <Wifi className="w-3 h-3" />
+            Gigabit Connection
+          </div>
+        </div>
 
-        {/* Hero Banner Area */}
-        <div className="flex-1 px-10 flex flex-col justify-center relative pb-32">
-          {data.sports.length > 0 && (
-            <div className="space-y-6">
-              <div className="flex items-center gap-3">
-                <div className="bg-red-600 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1.5 uppercase text-white">
-                  <span className="animate-pulse">●</span> Live
+        {/* Cinematic Hero Area */}
+        <div className="flex-1 px-16 flex flex-col justify-center relative pb-40">
+          {(activeLeague === "All Basketball" || activeLeague === "NBA") && data.basketball?.["NBA"]?.[0] && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8"
+            >
+              <div className="flex items-center gap-4">
+                <div className="bg-white/10 backdrop-blur-md px-3 py-1 rounded-md text-[10px] font-bold border border-white/10 tracking-[0.2em] uppercase text-white/80">
+                  Global Basketball Spotlight
                 </div>
-                <span className="text-sm text-white/60 tracking-wider uppercase">Formula 1 Monaco GP</span>
+                <div className="flex items-center gap-2 text-red-500 font-bold text-xs uppercase tracking-widest">
+                  <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                  Live EuroLeague
+                </div>
               </div>
-              <h1 className="text-7xl font-display font-bold tracking-tight max-w-3xl leading-[0.9] text-white">PORTUGAL VS FRANCE</h1>
-              <p className="max-w-xl text-lg text-white/50 leading-relaxed font-light italic">
-                Experience high-fidelity streaming from Estádio da Luz. High-bitrate stream enabled via ABR SportsPlayer. Auto-bookmarking active every 10s.
+              <h1 className="text-8xl font-display font-extrabold tracking-tight max-w-4xl leading-[0.85] text-white">
+                EUROPEAN  HOOPS
+              </h1>
+              <p className="max-w-2xl text-xl text-white/40 leading-relaxed font-medium">
+                From Madrid to Istanbul. Experience the intensity of European basketball in stunning 4K.
               </p>
-              <div className="flex gap-4 pt-4">
+              <div className="flex gap-6 pt-6">
                 <button 
-                  onClick={() => handleSelect(data.sports[0])}
-                  className="px-10 py-4 bg-white text-black font-bold text-sm uppercase tracking-[0.2em] hover:bg-roku-gold transition-colors focus:ring-4 ring-white/20 outline-none"
+                  onClick={() => handleSelect(data.basketball?.["EuroLeague"]?.[0] || data.sports[0])}
+                  className="px-12 py-5 bg-white text-black font-display font-black text-sm uppercase tracking-[0.2em] rounded-xl hover:scale-110 active:scale-95 transition-all shadow-2xl shadow-white/20"
                 >
-                  Watch Now
+                  Watch EuroLeague
                 </button>
-                <button className="px-10 py-4 bg-white/10 backdrop-blur-md border border-white/10 font-bold text-sm uppercase tracking-[0.2em] hover:bg-white/20 transition-colors text-white">
-                  Details
+                <button 
+                  onClick={() => {
+                    const heroItem = data.basketball?.["EuroLeague"]?.[0] || data.sports[0];
+                    if (heroItem) toggleFavorite(heroItem.id);
+                  }}
+                  className={`px-12 py-5 rounded-xl font-display font-black text-sm uppercase tracking-[0.2em] transition-all
+                    ${activeProfile?.favorites.includes(data.basketball?.["EuroLeague"]?.[0]?.id || data.sports[0].id)
+                      ? 'bg-apple-blue text-white shadow-[0_0_40px_rgba(0,122,255,0.4)]'
+                      : 'bg-white/5 backdrop-blur-xl border border-white/10 text-white hover:bg-white/10'}`}
+                >
+                  {activeProfile?.favorites.includes(data.basketball?.["EuroLeague"]?.[0]?.id || data.sports[0].id) 
+                    ? 'In My List' 
+                    : 'Add to My List'}
                 </button>
               </div>
-            </div>
+            </motion.div>
           )}
         </div>
 
-        {/* Architecture Logs Overlay */}
-        <div className="absolute top-24 right-10 w-64 bg-black/60 backdrop-blur-xl border border-white/10 p-4 rounded-xl z-30 hidden lg:block">
-          <div className="text-[10px] uppercase tracking-widest text-white/40 mb-3">System Metrics</div>
-          <div className="space-y-3 font-mono text-[9px]">
-            <div className="flex justify-between items-center text-white">
-              <span className="text-blue-400">DataLoader.brs</span>
-              <span className="text-green-500">SUCCESS</span>
-            </div>
-            <div className="flex justify-between items-center text-white">
-              <span className="text-blue-400">SportsPlayer.brs</span>
-              <span className="text-green-500">OPTIMAL</span>
-            </div>
-            <div className="flex justify-between items-center text-white">
-              <span className="text-blue-400">Registry.brs</span>
-              <span className="text-white/40">SYNCED</span>
-            </div>
-            <div className="mt-2 pt-2 border-t border-white/5">
-              <div className="text-white/60 mb-1">Deep Linking Payload:</div>
-              <div className="bg-white/5 p-2 rounded text-[8px] text-white/40 leading-tight">
-                contentId: "pts_fra_2024"<br/>
-                mediaType: "live_sports"
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Content Shelves (Rows) at Bottom */}
+        <div className="absolute bottom-0 left-0 right-0 h-96 pt-8 bg-linear-to-t from-apple-midnight via-apple-midnight/90 to-transparent z-20 overflow-y-auto no-scrollbar">
+          <div className="space-y-8 pb-12">
+            {view === "home" && (
+              <>
+                <div className="flex px-16 gap-4 border-b border-white/5 mb-2">
+                  {["Basketball", "Soccer"].map(sport => (
+                    <button
+                      key={sport}
+                      onClick={() => {
+                        setActiveSport(sport as "Basketball" | "Soccer");
+                        setActiveLeague(sport === "Basketball" ? "All Basketball" : "World Cup");
+                      }}
+                      className={`px-6 py-2 font-display font-black text-sm uppercase tracking-widest transition-all
+                        ${activeSport === sport ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white/60'}`}
+                    >
+                      {sport}
+                    </button>
+                  ))}
+                </div>
 
-        {/* Categories / Rows at Bottom */}
-        <div className="absolute bottom-0 left-0 right-0 h-72 pt-4 bg-linear-to-t from-roku-dark via-roku-dark/95 to-transparent z-20 overflow-y-auto no-scrollbar">
-          <div className="space-y-4">
-            <ContentRow title="Live Now in Sports" items={data.sports} onSelect={handleSelect} />
-            <ContentRow title="Featured Movies" items={data.movies} onSelect={handleSelect} />
-            <ContentRow title="Channel Guide" items={data.live_tv} onSelect={handleSelect} />
+                <LeagueTabs 
+                  leagues={activeSport === "Basketball" 
+                    ? ["All Basketball", "NBA", "EuroLeague", "NCAA", "Other"] 
+                    : ["World Cup", "Champions League", "Premier League", "MLS"]} 
+                  activeLeague={activeLeague} 
+                  onSelect={setActiveLeague} 
+                />
+                
+                {activeSport === "Basketball" ? (
+                  activeLeague === "All Basketball" ? (
+                    <>
+                      {recentlyWatched.length > 0 && <ContentRow title="Continue Watching" items={recentlyWatched} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />}
+                      {myList.length > 0 && <ContentRow title="My List" items={myList} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />}
+                      {recommendations.length > 0 && <ContentRow title="Up Next" items={recommendations} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />}
+                      {data.basketball && Object.entries(data.basketball).map(([league, leagueItems]) => (
+                        <div key={league}>
+                          <ContentRow title={league} items={leagueItems as ContentItem[]} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />
+                        </div>
+                      ))}
+                      <ContentRow title="Global Sports" items={data.sports} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />
+                    </>
+                  ) : (
+                    <>
+                      {data.basketball?.[activeLeague] && (
+                        <ContentRow title={`${activeLeague} Live & Upcoming`} items={data.basketball[activeLeague] as ContentItem[]} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />
+                      )}
+                    </>
+                  )
+                ) : (
+                  activeLeague === "World Cup" ? (
+                    <div className="space-y-8 bg-linear-to-b from-green-900/20 to-transparent py-8 -mt-4">
+                      <div className="px-16 flex items-center gap-4">
+                         <div className="w-12 h-12 bg-yellow-500 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(234,179,8,0.4)]">
+                           <Trophy className="text-black w-6 h-6" />
+                         </div>
+                         <div>
+                            <h2 className="text-3xl font-display font-black text-white italic tracking-tighter uppercase">World Cup Hub</h2>
+                            <p className="text-white/40 text-xs font-mono tracking-widest uppercase">The Road to Glory</p>
+                         </div>
+                      </div>
+                      <ContentRow title="Live Matches" items={data.soccer ? data.soccer["World Cup"] : []} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />
+                      <ContentRow title="Popular Highlights" items={data.soccer ? data.soccer["Champions League"] : []} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />
+                    </div>
+                  ) : (
+                    <>
+                       {data.soccer?.[activeLeague] && (
+                        <ContentRow title={`${activeLeague} Excellence`} items={data.soccer[activeLeague] as ContentItem[]} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />
+                      )}
+                    </>
+                  )
+                )}
+                <ContentRow title="Blockbuster Movies" items={data.movies} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />
+                <ContentRow title="Featured Channels" items={data.live_tv} onSelect={handleSelect} resumePositions={activeProfile?.resumePositions} />
+              </>
+            )}
           </div>
         </div>
       </main>
 
       {/* Overlays */}
       <AnimatePresence>
+        {view === "profiles" && (
+          <ProfilePicker 
+            profiles={profiles} 
+            onSelect={handleProfileSelect} 
+            onAdd={handleAddProfile} 
+          />
+        )}
         {view === "search" && (
           <SearchScreen onClose={() => setView("home")} onSelect={handleSelect} />
         )}
         {view === "player" && selectedItem && (
-          <SportsPlayer item={selectedItem} onClose={() => setView("home")} />
+          <SportsPlayer 
+            item={selectedItem} 
+            onClose={() => setView("home")} 
+            initialTime={activeProfile?.resumePositions[selectedItem.id] || 0}
+            onProgressUpdate={(seconds) => updateResumePosition(selectedItem.id, seconds)}
+          />
         )}
       </AnimatePresence>
     </div>

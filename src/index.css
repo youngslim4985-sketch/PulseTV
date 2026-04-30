@@ -1,25 +1,37 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", sans-serif;
+  --font-display: "Outfit", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
-  --color-roku-purple: #3b0a64;
-  --color-roku-gold: #eab308;
-  --color-roku-dark: #050508;
-  --color-roku-sidebar: #0a0a0f;
+  --color-apple-glass: rgba(255, 255, 255, 0.08);
+  --color-apple-glass-heavy: rgba(10, 10, 15, 0.8);
+  --color-apple-blue: #007AFF;
+  --color-apple-midnight: #050508;
 }
 
 @layer base {
   body {
-    @apply bg-roku-dark text-white font-sans antialiased overflow-hidden;
+    @apply bg-apple-midnight text-white font-sans antialiased overflow-hidden;
   }
 }
 
 @layer components {
-  .focus-ring {
-    @apply border-2 border-roku-gold shadow-[0_0_30px_rgba(234,179,8,0.3)] outline-none transition-all duration-200;
+  .glass {
+    @apply bg-white/5 backdrop-blur-2xl border border-white/10;
   }
+  
+  .tv-focus {
+    @apply scale-105 shadow-[0_20px_50px_rgba(0,0,0,0.5)] border-white/40 ring-4 ring-white/20 outline-none transition-all duration-300;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
